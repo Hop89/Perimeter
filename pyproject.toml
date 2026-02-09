@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "perimeter"
+version = "0.1.0"
+description = "Network scanner CLI wrapper around nmap."
+readme = "README.md"
+requires-python = ">=3.9"
+
+[project.scripts]
+perimeter = "perimeter.cli:main"
