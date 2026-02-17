@@ -37,12 +37,20 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _handle_scan(args: argparse.Namespace) -> int:
-    result = run_nmap_scan(
-        args.target,
-        extra_args=args.nmap_arg,
-        output_path=args.output,
-        timeout_seconds=args.timeout,
-    )
+    try:
+        result = run_nmap_scan(
+            args.target,
+            extra_args=args.nmap_arg,
+            output_path=args.output,
+            timeout_seconds=args.timeout,
+        )
+    except NmapNotFoundError:
+        sys.stderr.write("nmap is not installed or not on PATH.\n")
+        sys.stderr.write(
+            "Windows: install Nmap and enable 'Add to PATH' during setup.\n"
+        )
+        sys.stderr.write("Linux (Debian/Ubuntu): sudo apt install nmap\n")
+        return 2
     if result.stdout:
         sys.stdout.write(result.stdout)
         if not result.stdout.endswith("\n"):

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import os
 import shutil
 import subprocess
-from typing import Iterable, Sequence
+from typing import Iterable
 
 
 class NmapNotFoundError(RuntimeError):
@@ -24,11 +25,22 @@ class NmapResult:
 
 def _find_nmap() -> str:
     nmap_path = shutil.which("nmap")
-    if not nmap_path:
-        raise NmapNotFoundError(
-            "nmap not found on PATH. Install nmap and ensure it is available in PATH."
+    if nmap_path:
+        return nmap_path
+
+    # Common Windows install paths in case PATH is not refreshed in current shell.
+    if os.name == "nt":
+        candidates = (
+            Path(r"C:\Program Files (x86)\Nmap\nmap.exe"),
+            Path(r"C:\Program Files\Nmap\nmap.exe"),
         )
-    return nmap_path
+        for candidate in candidates:
+            if candidate.exists():
+                return str(candidate)
+
+    raise NmapNotFoundError(
+        "nmap not found on PATH. Install nmap and ensure it is available in PATH."
+    )
 
 
 def _normalize_args(extra_args: Iterable[str] | None) -> list[str]:
