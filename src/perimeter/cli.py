@@ -15,11 +15,13 @@ from perimeter.nmap_runner import (
 )
 
 
-def _build_parser() -> argparse.ArgumentParser:
+def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.ArgumentParser]]:
     parser = argparse.ArgumentParser(prog="perimeter")
     subparsers = parser.add_subparsers(dest="command", required=True)
+    command_parsers: dict[str, argparse.ArgumentParser] = {}
 
     scan = subparsers.add_parser("scan", help="Run an nmap scan against a target.")
+    command_parsers["scan"] = scan
     scan.add_argument(
         "target",
         nargs="?",
@@ -53,7 +55,15 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print raw XML output instead of formatted summary.",
     )
-    return parser
+    help_cmd = subparsers.add_parser("help", help="Show CLI help.")
+    command_parsers["help"] = help_cmd
+    help_cmd.add_argument(
+        "topic",
+        nargs="?",
+        choices=["scan"],
+        help="Optional command name to show detailed help for.",
+    )
+    return parser, command_parsers
 
 
 def _handle_scan(args: argparse.Namespace) -> int:
@@ -110,11 +120,17 @@ def _handle_scan(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = _build_parser()
+    parser, command_parsers = _build_parser()
     args = parser.parse_args(argv)
 
     if args.command == "scan":
         return _handle_scan(args)
+    if args.command == "help":
+        if args.topic:
+            command_parsers[args.topic].print_help()
+        else:
+            parser.print_help()
+        return 0
 
     parser.error(f"Unknown command: {args.command}")
     return 2
