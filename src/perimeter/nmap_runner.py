@@ -6,12 +6,17 @@ from dataclasses import dataclass
 from pathlib import Path
 import os
 import shutil
+import socket
 import subprocess
 from typing import Iterable
 
 
 class NmapNotFoundError(RuntimeError):
     """Raised when nmap is not available on PATH."""
+
+
+class LocalIPDetectionError(RuntimeError):
+    """Raised when the local connected IP cannot be determined."""
 
 
 @dataclass(frozen=True)
@@ -47,6 +52,26 @@ def _normalize_args(extra_args: Iterable[str] | None) -> list[str]:
     if not extra_args:
         return []
     return [str(arg) for arg in extra_args]
+
+
+def detect_connected_ip() -> str:
+    """
+    Return the local IPv4 address used for outbound connections.
+
+    Uses a UDP socket connect trick that does not send packets.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.connect(("8.8.8.8", 80))
+        ip_addr = sock.getsockname()[0]
+    except OSError as exc:
+        raise LocalIPDetectionError("Could not detect connected local IP.") from exc
+    finally:
+        sock.close()
+
+    if not ip_addr or ip_addr.startswith("127."):
+        raise LocalIPDetectionError("Detected loopback IP; no active network adapter.")
+    return ip_addr
 
 
 def build_nmap_command(

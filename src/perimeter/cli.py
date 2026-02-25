@@ -7,7 +7,12 @@ from pathlib import Path
 import sys
 
 from perimeter.nmap_parser import format_scan_summary, parse_nmap_xml
-from perimeter.nmap_runner import NmapNotFoundError, run_nmap_scan
+from perimeter.nmap_runner import (
+    LocalIPDetectionError,
+    NmapNotFoundError,
+    detect_connected_ip,
+    run_nmap_scan,
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -15,7 +20,16 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     scan = subparsers.add_parser("scan", help="Run an nmap scan against a target.")
-    scan.add_argument("target", help="Target host or network (e.g. 192.168.1.0/24).")
+    scan.add_argument(
+        "target",
+        nargs="?",
+        help="Target host or network (e.g. 192.168.1.0/24).",
+    )
+    scan.add_argument(
+        "--connected",
+        action="store_true",
+        help="Scan the local IP currently used by this machine.",
+    )
     scan.add_argument(
         "--nmap-arg",
         action="append",
@@ -43,9 +57,25 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _handle_scan(args: argparse.Namespace) -> int:
+    if args.connected and args.target:
+        sys.stderr.write("Use either TARGET or --connected, not both.\n")
+        return 2
+    if not args.connected and not args.target:
+        sys.stderr.write("A TARGET is required unless --connected is used.\n")
+        return 2
+
+    target = args.target
+    if args.connected:
+        try:
+            target = detect_connected_ip()
+        except LocalIPDetectionError as exc:
+            sys.stderr.write(f"{exc}\n")
+            return 2
+        sys.stdout.write(f"Detected local IP: {target}\n")
+
     try:
         result = run_nmap_scan(
-            args.target,
+            target,
             extra_args=args.nmap_arg,
             output_path=args.output,
             timeout_seconds=args.timeout,
