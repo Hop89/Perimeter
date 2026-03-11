@@ -21,6 +21,14 @@ from perimeter.nmap_runner import (
 )
 
 
+def _resolve_scan_output_path(output_path: Path | None) -> Path | None:
+    if output_path is None:
+        return None
+    if output_path.is_absolute():
+        return output_path
+    return Path("reports") / output_path
+
+
 def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.ArgumentParser]]:
     parser = argparse.ArgumentParser(prog="perimeter")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -128,11 +136,19 @@ def _handle_scan(args: argparse.Namespace) -> int:
             return 2
         sys.stdout.write(f"Detected local IP: {target}\n")
 
+    output_path = _resolve_scan_output_path(args.output)
+    if output_path is not None:
+        try:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            sys.stderr.write(f"Failed to create output directory: {exc}\n")
+            return 2
+
     try:
         result = run_nmap_scan(
             target,
             extra_args=args.nmap_arg,
-            output_path=args.output,
+            output_path=output_path,
             timeout_seconds=args.timeout,
         )
     except NmapNotFoundError:
