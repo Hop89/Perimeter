@@ -8,7 +8,7 @@
 Perimeter uses **Nmap** for raw scan data and adds a defensive analysis layer on top.  
 The goal is not to replace Nmap, but to interpret results in a more actionable way (risk, misconfigs, trends, reporting).
 
-## Planned Features
+## Features
 - Risk-based scoring for hosts/services
 - Misconfiguration checks
 - Scan history + diffs
@@ -19,5 +19,8 @@ The goal is not to replace Nmap, but to interpret results in a more actionable w
 > Requires **Nmap** installed and available on PATH.
 
 ```bash
+# Install Perimeter
+pip install -e .
+
 # Example (LAN)
-netsentry scan 192.168.1.0/24 --top-ports 1000 --out report.md
+perimeter scan 192.168.1.0/24 --top-ports 1000 --out report.md
