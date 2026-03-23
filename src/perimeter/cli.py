@@ -19,6 +19,8 @@ from perimeter.nmap_runner import (
     detect_connected_ip,
     run_nmap_scan,
 )
+from perimeter.storage import IPReportStorage
+from perimeter.trend import TrendAnalyzer, format_trend_report
 
 
 def _resolve_scan_output_path(output_path: Path | None) -> Path | None:
@@ -27,6 +29,29 @@ def _resolve_scan_output_path(output_path: Path | None) -> Path | None:
     if output_path.is_absolute():
         return output_path
     return Path("reports") / output_path
+
+
+def _build_target_report(
+    host: dict[str, object],
+    *,
+    source: Path,
+    ai_triage: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Build a target-scoped report for storage and historical comparison."""
+    analysis = analyze_hosts([host])
+    report: dict[str, object] = {
+        "summary": analysis.summary,
+        "findings": analysis.findings,
+        "source": str(source),
+        "host": {
+            "address": host.get("address", "unknown"),
+            "state": host.get("state", "unknown"),
+            "hostnames": host.get("hostnames", []),
+        },
+    }
+    if ai_triage is not None:
+        report["ai"] = ai_triage
+    return report
 
 
 def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.ArgumentParser]]:
@@ -108,12 +133,65 @@ def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argumen
         default=None,
         help="Override model used for AI triage (defaults to PERIMETER_AI_MODEL or gpt-4o-mini).",
     )
+    analyze.add_argument(
+        "--store-report",
+        action="store_true",
+        help="Automatically store this report organized by target IP for trend analysis.",
+    )
+    analyze.add_argument(
+        "--reports-dir",
+        type=Path,
+        default=Path("reports"),
+        help="Directory to store reports (used with --store-report). Default: reports/",
+    )
+
+    trend = subparsers.add_parser(
+        "trend",
+        help="Analyze trends across historical reports for a target IP.",
+    )
+    command_parsers["trend"] = trend
+    trend.add_argument(
+        "target_ip",
+        help="Target IP address to analyze trends for.",
+    )
+    trend.add_argument(
+        "--reports-dir",
+        type=Path,
+        default=Path("reports"),
+        help="Directory where reports are stored. Default: reports/",
+    )
+    trend.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format for trend analysis.",
+    )
+    trend.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Write trend analysis output to a file instead of stdout.",
+    )
+    trend.add_argument(
+        "--compare",
+        type=int,
+        nargs=2,
+        metavar=("INDEX1", "INDEX2"),
+        help="Compare two specific reports (indices, 0=latest). Requires two indices.",
+    )
+    trend.add_argument(
+        "--max-items",
+        type=int,
+        default=5,
+        help="Maximum items to show per category in text output.",
+    )
+
     help_cmd = subparsers.add_parser("help", help="Show CLI help.")
     command_parsers["help"] = help_cmd
     help_cmd.add_argument(
         "topic",
         nargs="?",
-        choices=["scan", "analyze"],
+        choices=["scan", "analyze", "trend"],
         help="Optional command name to show detailed help for.",
     )
     return parser, command_parsers
@@ -204,6 +282,7 @@ def _handle_analyze(args: argparse.Namespace) -> int:
         "source": str(args.input_xml),
     }
 
+    ai_triage: dict[str, object] | None = None
     if args.ai:
         try:
             ai_triage = maybe_generate_ai_triage(report, enabled=True, model=args.ai_model)
@@ -217,6 +296,29 @@ def _handle_analyze(args: argparse.Namespace) -> int:
         else:
             report["ai"] = ai_triage
 
+    # Store report if requested
+    stored_reports: list[str] = []
+    if args.store_report and hosts:
+        storage = IPReportStorage(args.reports_dir)
+        hosts_by_ip: dict[str, dict[str, object]] = {}
+        for host in hosts:
+            ip = str(host.get("address", "")).strip()
+            if ip and ip != "unknown":
+                hosts_by_ip[ip] = host
+
+        for target_ip in sorted(hosts_by_ip):
+            try:
+                target_report = _build_target_report(
+                    hosts_by_ip[target_ip],
+                    source=args.input_xml,
+                    ai_triage=ai_triage if len(hosts_by_ip) == 1 else None,
+                )
+                saved_path = storage.save_report(target_ip, target_report)
+                stored_reports.append(str(saved_path))
+                sys.stderr.write(f"Report stored for {target_ip}: {saved_path}\n")
+            except OSError as exc:
+                sys.stderr.write(f"Failed to store report for {target_ip}: {exc}\n")
+
     if args.format == "json":
         rendered = json.dumps(report, indent=2)
     else:
@@ -229,6 +331,62 @@ def _handle_analyze(args: argparse.Namespace) -> int:
             sys.stderr.write(f"Failed to write output file: {exc}\n")
             return 2
         sys.stdout.write(f"Analysis written to: {args.output}\n")
+        if stored_reports:
+            sys.stdout.write(f"Reports stored for {len(stored_reports)} IP(s)\n")
+        return 0
+
+    sys.stdout.write(rendered)
+    if not rendered.endswith("\n"):
+        sys.stdout.write("\n")
+    if stored_reports:
+        sys.stdout.write(f"\nReports stored for {len(stored_reports)} IP(s)\n")
+    return 0
+
+
+def _handle_trend(args: argparse.Namespace) -> int:
+    """Handle trend analysis command."""
+    storage = IPReportStorage(args.reports_dir)
+    analyzer = TrendAnalyzer(storage)
+
+    # Check if target IP has any reports
+    reports = storage.get_target_reports(args.target_ip)
+    if not reports:
+        sys.stderr.write(f"No reports found for target: {args.target_ip}\n")
+        sys.stderr.write(
+            f"Use: perimeter analyze <xml> --store-report to begin storing reports.\n"
+        )
+        return 2
+
+    if args.compare and len(args.compare) == 2:
+        # Compare two specific reports
+        idx1, idx2 = args.compare
+        comparison = analyzer.compare_reports(args.target_ip, idx1, idx2)
+        if comparison is None:
+            sys.stderr.write(
+                f"Cannot compare reports at indices {idx1} and {idx2}. "
+                f"Only {len(reports)} report(s) available.\n"
+            )
+            return 2
+        rendered = json.dumps(comparison, indent=2)
+    else:
+        # Get trend summary
+        trend_data = analyzer.get_trend_summary(args.target_ip)
+        if trend_data is None:
+            sys.stderr.write(f"No trend data available for: {args.target_ip}\n")
+            return 2
+
+        if args.format == "json":
+            rendered = json.dumps(trend_data, indent=2)
+        else:
+            rendered = format_trend_report(trend_data, max_items=args.max_items)
+
+    if args.output is not None:
+        try:
+            args.output.write_text(f"{rendered}\n", encoding="utf-8")
+        except OSError as exc:
+            sys.stderr.write(f"Failed to write output file: {exc}\n")
+            return 2
+        sys.stdout.write(f"Trend analysis written to: {args.output}\n")
         return 0
 
     sys.stdout.write(rendered)
@@ -245,6 +403,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_scan(args)
     if args.command == "analyze":
         return _handle_analyze(args)
+    if args.command == "trend":
+        return _handle_trend(args)
     if args.command == "help":
         if args.topic:
             command_parsers[args.topic].print_help()
