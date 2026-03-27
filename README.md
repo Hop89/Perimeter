@@ -31,6 +31,9 @@ perimeter scan 192.168.1.0/24 --output scan.xml
 # Analyze and store the report (organized by IP)
 perimeter analyze reports/scan.xml --store-report
 
+# Analyze the newest XML saved under reports/
+perimeter analyze --latest
+
 # View trends for a target IP across historical reports
 perimeter trend 192.168.1.100
 
@@ -67,6 +70,7 @@ Analyze nmap XML output and produce prioritized vulnerability triage.
 - `--format [text|json]`: Output format (default: text)
 - `--output <path>`: Write analysis to file instead of stdout
 - `--max-findings <n>`: Maximum findings to display in text mode (default: 20)
+- `--latest`: Analyze the most recently modified XML file in `reports/`
 - `--ai`: Enable AI-powered triage enrichment (requires `OPENAI_API_KEY`)
 - `--ai-model <model>`: Override AI model (default: gpt-4o-mini)
 - `--store-report`: **Automatically store this report organized by target IP** for trend tracking
@@ -76,6 +80,9 @@ Analyze nmap XML output and produce prioritized vulnerability triage.
 ```bash
 # Analyze and store report for trend tracking
 perimeter analyze scan.xml --store-report
+
+# Analyze the most recent XML report in reports/
+perimeter analyze --latest
 
 # Generate JSON analysis output
 perimeter analyze reports/scan.xml --format json --output analysis.json

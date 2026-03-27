@@ -17,6 +17,106 @@ from perimeter.storage import IPReportStorage
 
 
 class VerificationTests(unittest.TestCase):
+    def test_analyze_resolves_relative_input_from_reports_directory(self) -> None:
+        xml_text = textwrap.dedent(
+            """\
+            <nmaprun>
+              <host>
+                <status state="up" />
+                <address addr="10.24.59.124" />
+                <ports>
+                  <port protocol="tcp" portid="445">
+                    <state state="open" />
+                    <service name="microsoft-ds" />
+                  </port>
+                </ports>
+              </host>
+            </nmaprun>
+            """
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            reports_dir = tmp_path / "reports"
+            reports_dir.mkdir()
+            (reports_dir / "scan.xml").write_text(xml_text, encoding="utf-8")
+
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with patch("perimeter.cli.Path", wraps=Path):
+                with redirect_stdout(stdout), redirect_stderr(stderr):
+                    previous_cwd = Path.cwd()
+                    try:
+                        import os
+
+                        os.chdir(tmp_path)
+                        exit_code = main(["analyze", "scan.xml"])
+                    finally:
+                        os.chdir(previous_cwd)
+
+            self.assertEqual(exit_code, 0)
+            self.assertIn("10.24.59.124", stdout.getvalue())
+
+    def test_analyze_latest_uses_most_recent_report_in_reports_directory(self) -> None:
+        older_xml = textwrap.dedent(
+            """\
+            <nmaprun>
+              <host>
+                <status state="up" />
+                <address addr="10.0.0.10" />
+                <ports>
+                  <port protocol="tcp" portid="80">
+                    <state state="open" />
+                    <service name="http" />
+                  </port>
+                </ports>
+              </host>
+            </nmaprun>
+            """
+        )
+        latest_xml = textwrap.dedent(
+            """\
+            <nmaprun>
+              <host>
+                <status state="up" />
+                <address addr="10.0.0.20" />
+                <ports>
+                  <port protocol="tcp" portid="445">
+                    <state state="open" />
+                    <service name="microsoft-ds" />
+                  </port>
+                </ports>
+              </host>
+            </nmaprun>
+            """
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            reports_dir = tmp_path / "reports"
+            reports_dir.mkdir()
+            older_path = reports_dir / "older.xml"
+            latest_path = reports_dir / "latest.xml"
+            older_path.write_text(older_xml, encoding="utf-8")
+            latest_path.write_text(latest_xml, encoding="utf-8")
+            latest_mtime = older_path.stat().st_mtime + 10
+            import os
+
+            os.utime(latest_path, (latest_mtime, latest_mtime))
+
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                previous_cwd = Path.cwd()
+                try:
+                    os.chdir(tmp_path)
+                    exit_code = main(["analyze", "--latest"])
+                finally:
+                    os.chdir(previous_cwd)
+
+            self.assertEqual(exit_code, 0)
+            self.assertIn("10.0.0.20", stdout.getvalue())
+
     def test_analyze_store_report_saves_target_scoped_reports(self) -> None:
         xml_text = textwrap.dedent(
             """\

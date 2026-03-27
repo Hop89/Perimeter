@@ -31,6 +31,30 @@ def _resolve_scan_output_path(output_path: Path | None) -> Path | None:
     return Path("reports") / output_path
 
 
+def _resolve_analysis_input_path(
+    input_xml: Path | None,
+    *,
+    latest: bool,
+) -> Path | None:
+    if latest:
+        candidates = sorted(
+            Path("reports").glob("*.xml"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        return candidates[0] if candidates else None
+
+    if input_xml is None:
+        return None
+    if input_xml.is_absolute() or input_xml.exists():
+        return input_xml
+
+    reports_path = Path("reports") / input_xml
+    if reports_path.exists():
+        return reports_path
+    return input_xml
+
+
 def _build_target_report(
     host: dict[str, object],
     *,
@@ -102,8 +126,14 @@ def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argumen
     command_parsers["analyze"] = analyze
     analyze.add_argument(
         "input_xml",
+        nargs="?",
         type=Path,
         help="Path to nmap XML output file.",
+    )
+    analyze.add_argument(
+        "--latest",
+        action="store_true",
+        help="Analyze the most recently modified XML file in reports/.",
     )
     analyze.add_argument(
         "--format",
@@ -259,12 +289,23 @@ def _handle_scan(args: argparse.Namespace) -> int:
 
 
 def _handle_analyze(args: argparse.Namespace) -> int:
-    if not args.input_xml.exists():
-        sys.stderr.write(f"Input file not found: {args.input_xml}\n")
+    if args.latest and args.input_xml is not None:
+        sys.stderr.write("Use either INPUT_XML or --latest, not both.\n")
+        return 2
+    if not args.latest and args.input_xml is None:
+        sys.stderr.write("INPUT_XML is required unless --latest is used.\n")
+        return 2
+
+    input_xml = _resolve_analysis_input_path(args.input_xml, latest=args.latest)
+    if input_xml is None:
+        sys.stderr.write("No XML reports found in reports/.\n")
+        return 2
+    if not input_xml.exists():
+        sys.stderr.write(f"Input file not found: {input_xml}\n")
         return 2
 
     try:
-        xml_text = args.input_xml.read_text(encoding="utf-8")
+        xml_text = input_xml.read_text(encoding="utf-8")
     except OSError as exc:
         sys.stderr.write(f"Failed to read input XML: {exc}\n")
         return 2
@@ -279,7 +320,7 @@ def _handle_analyze(args: argparse.Namespace) -> int:
     report: dict[str, object] = {
         "summary": analysis.summary,
         "findings": analysis.findings,
-        "source": str(args.input_xml),
+        "source": str(input_xml),
     }
 
     ai_triage: dict[str, object] | None = None
@@ -310,7 +351,7 @@ def _handle_analyze(args: argparse.Namespace) -> int:
             try:
                 target_report = _build_target_report(
                     hosts_by_ip[target_ip],
-                    source=args.input_xml,
+                    source=input_xml,
                     ai_triage=ai_triage if len(hosts_by_ip) == 1 else None,
                 )
                 saved_path = storage.save_report(target_ip, target_report)
