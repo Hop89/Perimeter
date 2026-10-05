@@ -29,7 +29,7 @@ pip install -e .
 perimeter scan 192.168.1.0/24 --output scan.xml
 
 # Analyze and store the report (organized by IP)
-perimeter analyze scan.xml --store-report
+perimeter analyze reports/scan.xml --store-report
 
 # View trends for a target IP across historical reports
 perimeter trend 192.168.1.100
@@ -46,7 +46,7 @@ Run an Nmap scan against a target host or network.
 **Options:**
 - `--connected`: Scan the local IP currently used by this machine
 - `--nmap-arg`: Pass additional arguments to nmap (repeatable)
-- `--output <path>`: Write XML output to file instead of stdout
+- `--output <path>`: Write XML output to file instead of stdout (relative paths are saved under `reports/`)
 - `--timeout <seconds>`: Timeout for the nmap command
 - `--raw-xml`: Print raw XML output instead of formatted summary
 
@@ -57,6 +57,7 @@ perimeter scan 192.168.1.0/24 --nmap-arg "-p 1-1000" --nmap-arg "-sV" --output s
 
 # Scan your local machine
 perimeter scan --connected --output local_scan.xml
+# XML is saved as reports/local_scan.xml
 ```
 
 ### `perimeter analyze <XML_FILE>`
@@ -77,10 +78,10 @@ Analyze nmap XML output and produce prioritized vulnerability triage.
 perimeter analyze scan.xml --store-report
 
 # Generate JSON analysis output
-perimeter analyze scan.xml --format json --output analysis.json
+perimeter analyze reports/scan.xml --format json --output analysis.json
 
 # Enable AI triage enrichment
-perimeter analyze scan.xml --ai --store-report
+perimeter analyze reports/scan.xml --ai --store-report
 ```
 
 ### `perimeter trend <TARGET_IP>`
@@ -146,7 +147,7 @@ To enable AI-powered triage enrichment, set the `OPENAI_API_KEY` environment var
 
 ```bash
 export OPENAI_API_KEY="sk-..."
-perimeter analyze scan.xml --ai --store-report
+perimeter analyze reports/scan.xml --ai --store-report
 ```
 
 Override the default model:
@@ -163,12 +164,13 @@ export PERIMETER_AI_MODEL="gpt-4"
 - **storage.py**: IP-based report storage and retrieval
 - **trend.py**: Historical trend analysis and comparison
 
-## Quick Start
-> Requires **Nmap** installed and available on PATH.
+
+## Verification
+
+The repository includes `tests/verification.py`, which exercises per-target report storage, IPv6 report paths, and unique filenames for two reports saved within one second. These are automated test cases, not claims about a production deployment.
 
 ```bash
-# Install Perimeter
-pip install -e .
+python -m unittest discover -s tests -p 'verification.py'
+```
 
-# Example (LAN)
-perimeter scan 192.168.1.0/24 --top-ports 1000 --out report.md
+Only scan networks and devices you own or are authorized to assess.
