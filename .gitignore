@@ -31,3 +31,6 @@ Thumbs.db
 # Generated scan and analysis outputs
 reports/
 src/perimeter/report/
+
+# Scans
+*.xml
